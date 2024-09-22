@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package fileupload;
+
+option go_package = ".";
+
+service FileUploadService {
+  // Bidirectional Stream RPC
+  rpc Upload(stream UploadRequest) returns (stream UploadResponse);
+}
+
+message UploadRequest {
+  string bucket_name = 1; // Name of S3 bucket to upload to
+  string file_path = 2; // File path on S3 (including directory and file name)
+  bytes chunk_data = 3; // Date of file chunk
+  int32 chunk_number = 4; // Chunk number (indicate order)
+}
+
+message UploadResponse {
+  int32 chunk_number = 1;
+  string status = 2;
+  string message = 3;
+  float progress = 4;
+}
