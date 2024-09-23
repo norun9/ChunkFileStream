@@ -19,15 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	FileUploadService_Upload_FullMethodName = "/fileupload.FileUploadService/Upload"
+	FileUploadService_SingleUpload_FullMethodName   = "/fileupload.FileUploadService/SingleUpload"
+	FileUploadService_MultipleUpload_FullMethodName = "/fileupload.FileUploadService/MultipleUpload"
 )
 
 // FileUploadServiceClient is the client API for FileUploadService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type FileUploadServiceClient interface {
+	// Unary RPC
+	SingleUpload(ctx context.Context, in *SingleUploadRequest, opts ...grpc.CallOption) (*SingleUploadResponse, error)
 	// Bidirectional Stream RPC
-	Upload(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[UploadRequest, UploadResponse], error)
+	MultipleUpload(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[MultipleUploadRequest, MultipleUploadResponse], error)
 }
 
 type fileUploadServiceClient struct {
@@ -38,25 +41,37 @@ func NewFileUploadServiceClient(cc grpc.ClientConnInterface) FileUploadServiceCl
 	return &fileUploadServiceClient{cc}
 }
 
-func (c *fileUploadServiceClient) Upload(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[UploadRequest, UploadResponse], error) {
+func (c *fileUploadServiceClient) SingleUpload(ctx context.Context, in *SingleUploadRequest, opts ...grpc.CallOption) (*SingleUploadResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &FileUploadService_ServiceDesc.Streams[0], FileUploadService_Upload_FullMethodName, cOpts...)
+	out := new(SingleUploadResponse)
+	err := c.cc.Invoke(ctx, FileUploadService_SingleUpload_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[UploadRequest, UploadResponse]{ClientStream: stream}
+	return out, nil
+}
+
+func (c *fileUploadServiceClient) MultipleUpload(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[MultipleUploadRequest, MultipleUploadResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &FileUploadService_ServiceDesc.Streams[0], FileUploadService_MultipleUpload_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[MultipleUploadRequest, MultipleUploadResponse]{ClientStream: stream}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type FileUploadService_UploadClient = grpc.BidiStreamingClient[UploadRequest, UploadResponse]
+type FileUploadService_MultipleUploadClient = grpc.BidiStreamingClient[MultipleUploadRequest, MultipleUploadResponse]
 
 // FileUploadServiceServer is the server API for FileUploadService service.
 // All implementations must embed UnimplementedFileUploadServiceServer
 // for forward compatibility.
 type FileUploadServiceServer interface {
+	// Unary RPC
+	SingleUpload(context.Context, *SingleUploadRequest) (*SingleUploadResponse, error)
 	// Bidirectional Stream RPC
-	Upload(grpc.BidiStreamingServer[UploadRequest, UploadResponse]) error
+	MultipleUpload(grpc.BidiStreamingServer[MultipleUploadRequest, MultipleUploadResponse]) error
 	mustEmbedUnimplementedFileUploadServiceServer()
 }
 
@@ -67,8 +82,11 @@ type FileUploadServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedFileUploadServiceServer struct{}
 
-func (UnimplementedFileUploadServiceServer) Upload(grpc.BidiStreamingServer[UploadRequest, UploadResponse]) error {
-	return status.Errorf(codes.Unimplemented, "method Upload not implemented")
+func (UnimplementedFileUploadServiceServer) SingleUpload(context.Context, *SingleUploadRequest) (*SingleUploadResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SingleUpload not implemented")
+}
+func (UnimplementedFileUploadServiceServer) MultipleUpload(grpc.BidiStreamingServer[MultipleUploadRequest, MultipleUploadResponse]) error {
+	return status.Errorf(codes.Unimplemented, "method MultipleUpload not implemented")
 }
 func (UnimplementedFileUploadServiceServer) mustEmbedUnimplementedFileUploadServiceServer() {}
 func (UnimplementedFileUploadServiceServer) testEmbeddedByValue()                           {}
@@ -91,12 +109,30 @@ func RegisterFileUploadServiceServer(s grpc.ServiceRegistrar, srv FileUploadServ
 	s.RegisterService(&FileUploadService_ServiceDesc, srv)
 }
 
-func _FileUploadService_Upload_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(FileUploadServiceServer).Upload(&grpc.GenericServerStream[UploadRequest, UploadResponse]{ServerStream: stream})
+func _FileUploadService_SingleUpload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SingleUploadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FileUploadServiceServer).SingleUpload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FileUploadService_SingleUpload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FileUploadServiceServer).SingleUpload(ctx, req.(*SingleUploadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _FileUploadService_MultipleUpload_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(FileUploadServiceServer).MultipleUpload(&grpc.GenericServerStream[MultipleUploadRequest, MultipleUploadResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type FileUploadService_UploadServer = grpc.BidiStreamingServer[UploadRequest, UploadResponse]
+type FileUploadService_MultipleUploadServer = grpc.BidiStreamingServer[MultipleUploadRequest, MultipleUploadResponse]
 
 // FileUploadService_ServiceDesc is the grpc.ServiceDesc for FileUploadService service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -104,11 +140,16 @@ type FileUploadService_UploadServer = grpc.BidiStreamingServer[UploadRequest, Up
 var FileUploadService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "fileupload.FileUploadService",
 	HandlerType: (*FileUploadServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "SingleUpload",
+			Handler:    _FileUploadService_SingleUpload_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "Upload",
-			Handler:       _FileUploadService_Upload_Handler,
+			StreamName:    "MultipleUpload",
+			Handler:       _FileUploadService_MultipleUpload_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},
