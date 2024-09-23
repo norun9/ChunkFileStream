@@ -1,11 +1,11 @@
-package main
+package client
 
 import (
 	"context"
 	"flag"
 	"fmt"
-	pb "github.com/norun9/S3CP/pkg/proto"
-	mys3 "github.com/norun9/S3CP/pkg/s3"
+	pb "github.com/norun9/s3cp/pkg/proto"
+	mys3 "github.com/norun9/s3cp/pkg/s3"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"io"
@@ -42,7 +42,7 @@ func init() {
 
 const chunkSize = 5 * 1024 * 1024 // 5MB
 
-func main() {
+func Run() {
 	file, err := os.Open(*localFilePath)
 	if err != nil {
 		log.Fatalf("failed to open file %s: %v", *localFilePath, err)
