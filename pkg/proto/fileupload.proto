@@ -25,18 +25,18 @@ message S3Config {
 message SingleUploadRequest {
   AWSConfig aws_config = 1;
   S3Config s3_config = 2;
-  bytes data = 3;         // File data, up to 5MB
+  bytes data = 3;
 }
 
 message SingleUploadResponse {
-  string message = 1;     // Message describing the result
+  string message = 1;
 }
 
 message MultipleUploadRequest {
   AWSConfig aws_config = 1;
   S3Config s3_config = 2;
-  bytes chunk_data = 3; // Date of file chunk
-  int32 chunk_number = 4; // Chunk number (indicate order)
+  bytes chunk_data = 3;
+  int32 chunk_number = 4;
 }
 
 message MultipleUploadResponse {

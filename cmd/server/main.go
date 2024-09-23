@@ -51,7 +51,6 @@ type server struct {
 	pb.UnimplementedFileUploadServiceServer
 }
 
-// SingleUpload
 func (*server) SingleUpload(ctx context.Context, req *pb.SingleUploadRequest) (*pb.SingleUploadResponse, error) {
 	awsConfigReq := req.GetAwsConfig()
 	s3ConfigReq := req.GetS3Config()
