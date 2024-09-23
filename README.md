@@ -9,3 +9,8 @@ S3CP は、ローカルのファイルを Amazon S3 バケットにコピーす�
 # Test Command
 go run main.go -file_path ~/test.txt -bucket bucket -profile your-profile-name -dest_key test.txt
 ```
+
+## TODO
+
+- gRPCサーバーのKubernetesデプロイ
+- gRPC通信のTLS対応
