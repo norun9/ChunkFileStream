@@ -1,4 +1,4 @@
-package server
+package main
 
 import (
 	"bytes"
@@ -10,33 +10,67 @@ import (
 	pb "github.com/norun9/S3CP/pkg/proto"
 	mys3 "github.com/norun9/S3CP/pkg/s3"
 	"github.com/pkg/errors"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 	"io"
 	"log"
+	"net"
+	"os"
+	"os/signal"
 	"sync"
 )
+
+func main() {
+	// 1. 80番portのLisnterを作成
+	port := 80
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		panic(err)
+	}
+
+	// 2. gRPCサーバーを作成
+	s := grpc.NewServer()
+
+	pb.RegisterFileUploadServiceServer(s, &server{})
+
+	reflection.Register(s)
+
+	// 3. 作成したgRPCサーバーを、8080番ポートで稼働させる
+	go func() {
+		log.Printf("start gRPC server port: %v", port)
+		s.Serve(listener)
+	}()
+
+	// 4.Ctrl+Cが入力されたらGraceful shutdownされるようにする
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt)
+	<-quit
+	log.Println("stopping gRPC server...")
+	s.GracefulStop()
+}
 
 type server struct {
 	pb.UnimplementedFileUploadServiceServer
 }
 
-func (*server) Upload(ctx context.Context, req *pb.SingleUploadRequest) (*pb.SingleUploadResponse, error) {
+func (*server) SingleUpload(ctx context.Context, req *pb.SingleUploadRequest) (*pb.SingleUploadResponse, error) {
 	awsConfigReq := req.AwsConfig
 	svc := mys3.NewClient(ctx, mys3.AWSConfig{Profile: awsConfigReq.GetProfile(), Region: awsConfigReq.GetRegion()})
 	_, err := svc.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(req.GetBucket()),
-		Key:    aws.String(req.GetFilename()),
+		Key:    aws.String(req.GetKey()),
 		Body:   bytes.NewReader(req.GetData()),
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to upload file")
 	}
 	return &pb.SingleUploadResponse{
-		Message: fmt.Sprintf("file uploaded successfully. bucket: %s key: %s", req.GetBucket(), req.GetFilename()),
+		Message: fmt.Sprintf("file uploaded successfully. bucket: %s key: %s", req.GetBucket(), req.GetKey()),
 	}, nil
 }
 
 // MultipleUpload handles the bidirectional streaming of file chunks to S3
-func (*server) MultipleUpload(stream pb.FileUploadService_MultipleUploadServer) error {
+func (*server) MultipleUpload(stream grpc.BidiStreamingServer[pb.MultipleUploadRequest, pb.MultipleUploadResponse]) error {
 
 	var (
 		completedParts  []types.CompletedPart
@@ -57,7 +91,7 @@ func (*server) MultipleUpload(stream pb.FileUploadService_MultipleUploadServer) 
 
 	multipartUpload, err = svc.CreateMultipartUpload(stream.Context(), &s3.CreateMultipartUploadInput{
 		Bucket: aws.String(firstReq.GetBucket()),
-		Key:    aws.String(firstReq.GetFilename()),
+		Key:    aws.String(firstReq.GetKey()),
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to initiate multipart upload")
@@ -80,7 +114,7 @@ func (*server) MultipleUpload(stream pb.FileUploadService_MultipleUploadServer) 
 			defer wg.Done()
 			uploadResp, err := svc.UploadPart(stream.Context(), &s3.UploadPartInput{
 				Bucket:     aws.String(req.GetBucket()),
-				Key:        aws.String(req.GetFilename()),
+				Key:        aws.String(req.GetKey()),
 				PartNumber: aws.Int32(partNum),
 				UploadId:   uploadID,
 				Body:       bytes.NewReader(chunkData),
@@ -117,7 +151,7 @@ func (*server) MultipleUpload(stream pb.FileUploadService_MultipleUploadServer) 
 		// If any part fails, abort the multipart upload
 		_, abortErr := svc.AbortMultipartUpload(stream.Context(), &s3.AbortMultipartUploadInput{
 			Bucket:   aws.String(firstReq.GetBucket()),
-			Key:      aws.String(firstReq.GetFilename()),
+			Key:      aws.String(firstReq.GetKey()),
 			UploadId: uploadID,
 		})
 		if abortErr != nil {
@@ -129,7 +163,7 @@ func (*server) MultipleUpload(stream pb.FileUploadService_MultipleUploadServer) 
 	// Complete the multipart upload
 	_, err = svc.CompleteMultipartUpload(stream.Context(), &s3.CompleteMultipartUploadInput{
 		Bucket:   aws.String(firstReq.GetBucket()),
-		Key:      aws.String(firstReq.GetFilename()),
+		Key:      aws.String(firstReq.GetKey()),
 		UploadId: uploadID,
 		MultipartUpload: &types.CompletedMultipartUpload{
 			Parts: completedParts,

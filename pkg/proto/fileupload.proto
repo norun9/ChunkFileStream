@@ -13,7 +13,7 @@ service FileUploadService {
 
 message SingleUploadRequest {
   string bucket = 1;
-  string filename = 2;    // Filename for the upload
+  string key = 2;
   bytes data = 3;         // File data, up to 5MB
   AWSConfig aws_config = 4;
 }
@@ -24,7 +24,7 @@ message SingleUploadResponse {
 
 message MultipleUploadRequest {
   string bucket = 1;
-  string filename = 2;    // Filename being uploaded
+  string key = 2;    // Filename being uploaded
   bytes chunk_data = 3; // Date of file chunk
   int32 chunk_number = 4; // Chunk number (indicate order)
   AWSConfig aws_config = 5;

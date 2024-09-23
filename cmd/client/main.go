@@ -16,7 +16,8 @@ import (
 var (
 	profile       = flag.String("profile", "", "AWS profile")
 	region        = flag.String("region", "ap-northeast-1", "AWS region")
-	localFilePath = flag.String("file", "", "local file path to upload")
+	localFilePath = flag.String("file_path", "", "local file path to upload")
+	s3DestKey     = flag.String("dest_key", "", "S3 destination key to upload")
 	bucketName    = flag.String("bucket", "", "int flag")
 )
 
@@ -24,13 +25,17 @@ func init() {
 	flag.Parse()
 	fmt.Printf("param -profile(AWS) : %s\n", *profile)
 	fmt.Printf("param -region(AWS) : %s\n", *region)
-	fmt.Printf("param -file(S3) : %s\n", *localFilePath)
+	fmt.Printf("param -localFilePath(S3) : %s\n", *localFilePath)
+	fmt.Printf("param -s3DestKey(S3) : %s\n", *s3DestKey)
 	fmt.Printf("param -bucket(S3) : %s\n", *bucketName)
 	if *localFilePath == "" {
-		log.Fatalf("Error: Missing required parameter '-file'. Please specify the path to the local file you want to upload.")
+		log.Fatalf("Error: Missing required parameter '-file_path'. Please specify the path to the local file you want to upload.")
 	}
 	if *bucketName == "" {
 		log.Fatalf("Error: Missing required parameter '-bucket'. Please specify the S3 bucket name where the file should be uploaded.")
+	}
+	if *s3DestKey == "" {
+		log.Fatalf("Error: Missing required parameter '-dest_key'. Please specify the S3 destination key to upload.")
 	}
 }
 
@@ -43,7 +48,7 @@ func main() {
 	}
 	defer file.Close()
 
-	conn, err := grpc.NewClient("localhost:50051", grpc.WithInsecure())
+	conn, err := grpc.NewClient("localhost:80", grpc.WithInsecure())
 	if err != nil {
 		log.Fatalf("failed to grpc connect: %v", err)
 	}
@@ -81,7 +86,8 @@ func singleUpload(client pb.FileUploadServiceClient, file *os.File, conf mys3.AW
 		log.Fatalf("failed to read file: %v", err)
 	}
 	req := &pb.SingleUploadRequest{
-		Filename:  "",
+		Bucket:    *bucketName,
+		Key:       *s3DestKey,
 		Data:      buffer[:n],
 		AwsConfig: &pb.AWSConfig{Profile: conf.Profile, Region: conf.Region},
 	}
@@ -117,7 +123,8 @@ func multipleUpload(svc pb.FileUploadServiceClient, file *os.File, conf mys3.AWS
 
 		// 送信処理
 		err = stream.Send(&pb.MultipleUploadRequest{
-			Filename:    "",
+			Bucket:      *bucketName,
+			Key:         *s3DestKey,
 			ChunkData:   buffer[:n],
 			ChunkNumber: chunkNumber,
 			AwsConfig:   &pb.AWSConfig{Profile: conf.Profile, Region: conf.Region},
