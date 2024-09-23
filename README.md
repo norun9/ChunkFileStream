@@ -12,5 +12,5 @@ go run main.go -file_path ~/test.txt -bucket bucket -profile your-profile-name -
 
 ## TODO
 
-- gRPCサーバーのKubernetesデプロイ
+- gRPCサーバのKubernetesデプロイ
 - gRPC通信のTLS対応
