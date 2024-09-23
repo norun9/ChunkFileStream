@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"time"
 )
 
 var (
@@ -48,7 +49,11 @@ func main() {
 	}
 	defer file.Close()
 
-	conn, err := grpc.NewClient("localhost:80", grpc.WithInsecure())
+	conn, err := grpc.NewClient("localhost:80",
+		grpc.WithInsecure(),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10*1024*1024)),
+		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(10*1024*1024)),
+	)
 	if err != nil {
 		log.Fatalf("failed to grpc connect: %v", err)
 	}
@@ -102,7 +107,8 @@ func singleUpload(client pb.FileUploadServiceClient, file *os.File, conf mys3.AW
 }
 
 func multipleUpload(svc pb.FileUploadServiceClient, file *os.File, conf mys3.AWSConfig) (err error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
 	var stream grpc.BidiStreamingClient[pb.MultipleUploadRequest, pb.MultipleUploadResponse]
 	if stream, err = svc.MultipleUpload(ctx); err != nil {
 		return errors.Wrap(err, "failed to create upload stream")
@@ -121,6 +127,7 @@ func multipleUpload(svc pb.FileUploadServiceClient, file *os.File, conf mys3.AWS
 			return errors.Wrap(err, "failed to read file")
 		}
 
+		log.Printf("Sending chunk number %d with size %d bytes", chunkNumber, len(buffer[:n]))
 		// 送信処理
 		err = stream.Send(&pb.MultipleUploadRequest{
 			Bucket:      *bucketName,
@@ -132,6 +139,8 @@ func multipleUpload(svc pb.FileUploadServiceClient, file *os.File, conf mys3.AWS
 		if err != nil {
 			return errors.Wrap(err, "failed to send chunk")
 		}
+
+		log.Println("received chunk from client")
 
 		// 受信処理
 		resp, err := stream.Recv()

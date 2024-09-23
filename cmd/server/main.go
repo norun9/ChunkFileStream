@@ -17,7 +17,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"sync"
+	"time"
 )
 
 func main() {
@@ -29,7 +29,10 @@ func main() {
 	}
 
 	// 2. gRPCサーバーを作成
-	s := grpc.NewServer()
+	s := grpc.NewServer(
+		grpc.MaxRecvMsgSize(10*1024*1024), // 5MBに設定
+		grpc.MaxSendMsgSize(10*1024*1024), // 5MBに設定
+	)
 
 	pb.RegisterFileUploadServiceServer(s, &server{})
 
@@ -74,104 +77,122 @@ func (*server) MultipleUpload(stream grpc.BidiStreamingServer[pb.MultipleUploadR
 
 	var (
 		completedParts  []types.CompletedPart
-		wg              sync.WaitGroup
-		multipartUpload *s3.CreateMultipartUploadOutput
-		errChan               = make(chan error, 1)
 		partNumber      int32 = 1
+		uploadID        string
+		multipartUpload *s3.CreateMultipartUploadOutput
+		svc             *s3.Client
+		bucket          string
+		key             string
 	)
 
-	// Initialize multipart upload
-	firstReq, err := stream.Recv()
-	if err != nil {
-		return errors.Wrap(err, "failed to receive initial request")
-	}
-
-	awsConfigReq := firstReq.AwsConfig
-	svc := mys3.NewClient(stream.Context(), mys3.AWSConfig{Profile: awsConfigReq.Profile, Region: awsConfigReq.Region}) // Initialize S3 client
-
-	multipartUpload, err = svc.CreateMultipartUpload(stream.Context(), &s3.CreateMultipartUploadInput{
-		Bucket: aws.String(firstReq.GetBucket()),
-		Key:    aws.String(firstReq.GetKey()),
-	})
-	if err != nil {
-		return errors.Wrap(err, "failed to initiate multipart upload")
-	}
-
-	uploadID := multipartUpload.UploadId
-
-	// Handle file chunks
+	// 1. ループ内で最初のリクエストおよびその後のチャンクを処理
 	for {
-		req, err := stream.Recv()
+		log.Println("Waiting for chunk...")
+
+		req, err := stream.Recv() // クライアントからのリクエストを受信
 		if errors.Is(err, io.EOF) {
+			log.Println("All chunks received.")
 			break
 		}
 		if err != nil {
 			return errors.Wrap(err, "failed to receive chunk")
 		}
 
-		wg.Add(1)
-		go func(partNum int32, chunkData []byte) {
-			defer wg.Done()
-			uploadResp, err := svc.UploadPart(stream.Context(), &s3.UploadPartInput{
-				Bucket:     aws.String(req.GetBucket()),
-				Key:        aws.String(req.GetKey()),
-				PartNumber: aws.Int32(partNum),
-				UploadId:   uploadID,
-				Body:       bytes.NewReader(chunkData),
+		// 2. 最初のリクエストでS3のマルチパートアップロードを初期化
+		if partNumber == 1 {
+			awsConfigReq := req.AwsConfig
+			bucket = req.GetBucket()
+			key = req.GetKey()
+			svc = mys3.NewClient(stream.Context(), mys3.AWSConfig{
+				Profile: awsConfigReq.Profile,
+				Region:  awsConfigReq.Region,
+			})
+
+			// マルチパートアップロードの開始
+			multipartUpload, err = svc.CreateMultipartUpload(stream.Context(), &s3.CreateMultipartUploadInput{
+				Bucket: aws.String(req.GetBucket()),
+				Key:    aws.String(req.GetKey()),
+				//ContentType: aws.String(contType),
 			})
 			if err != nil {
-				errChan <- err
-				return
+				return errors.Wrap(err, "failed to initiate multipart upload")
 			}
+			uploadID = *multipartUpload.UploadId
+			log.Printf("Multipart upload initiated: UploadID: %s", uploadID)
+		}
 
-			// Append the uploaded part to the list of completed parts
-			completedParts = append(completedParts, types.CompletedPart{
-				ETag:       uploadResp.ETag,
-				PartNumber: aws.Int32(partNum),
-			})
+		log.Printf("Received chunk number %d, size: %d bytes", partNumber, len(req.GetChunkData()))
 
-			// Send a response back to the client
-			if err := stream.Send(&pb.MultipleUploadResponse{
-				ChunkNumber: partNum,
-				Message:     fmt.Sprintf("Chunk %d uploaded successfully", partNum),
-				Progress:    float32(partNum) * 100.0 / float32(len(completedParts)), // Optional progress
-			}); err != nil {
-				log.Printf("Failed to send response for chunk %d: %v", partNum, err)
+		// S3にチャンクをアップロード
+		uploadResp, err := svc.UploadPart(stream.Context(), &s3.UploadPartInput{
+			Bucket:     aws.String(req.GetBucket()),
+			Key:        aws.String(req.GetKey()),
+			PartNumber: aws.Int32(partNumber),
+			UploadId:   aws.String(uploadID),
+			Body:       bytes.NewReader(req.GetChunkData()),
+		})
+		if err != nil {
+			// アップロードに失敗した場合はAbortMultipartUploadを呼び出す
+			log.Printf("Error uploading part %d: %v", partNumber, err)
+			abortErr := abortMultipartUpload(stream.Context(), svc, req.GetBucket(), req.GetKey(), uploadID)
+			if abortErr != nil {
+				log.Printf("Failed to abort multipart upload: %v", abortErr)
 			}
-		}(partNumber, req.GetChunkData())
+			return errors.Wrap(err, "failed to upload part")
+		}
+
+		// アップロードしたパート情報を追跡
+		completedParts = append(completedParts, types.CompletedPart{
+			ETag:       uploadResp.ETag,
+			PartNumber: aws.Int32(partNumber),
+		})
+
+		// クライアントに進捗を送信
+		err = stream.Send(&pb.MultipleUploadResponse{
+			ChunkNumber: partNumber,
+			Message:     fmt.Sprintf("Chunk %d uploaded successfully", partNumber),
+		})
+		if err != nil {
+			return errors.Wrap(err, "failed to send response")
+		}
 
 		partNumber++
 	}
 
-	// Wait for all parts to be uploaded
-	wg.Wait()
-	close(errChan)
+	log.Printf("Completed parts: %+v", completedParts)
 
-	if err := <-errChan; err != nil {
-		// If any part fails, abort the multipart upload
-		_, abortErr := svc.AbortMultipartUpload(stream.Context(), &s3.AbortMultipartUploadInput{
-			Bucket:   aws.String(firstReq.GetBucket()),
-			Key:      aws.String(firstReq.GetKey()),
-			UploadId: uploadID,
-		})
-		if abortErr != nil {
-			log.Printf("Failed to abort multipart upload: %v", abortErr)
-		}
-		return errors.Wrap(err, "multipart upload failed")
-	}
-
-	// Complete the multipart upload
-	_, err = svc.CompleteMultipartUpload(stream.Context(), &s3.CompleteMultipartUploadInput{
-		Bucket:   aws.String(firstReq.GetBucket()),
-		Key:      aws.String(firstReq.GetKey()),
-		UploadId: uploadID,
+	// 3. マルチパートアップロードの完了
+	s3Ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	_, err := svc.CompleteMultipartUpload(s3Ctx, &s3.CompleteMultipartUploadInput{
+		Bucket:   aws.String(bucket),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
 		MultipartUpload: &types.CompletedMultipartUpload{
 			Parts: completedParts,
 		},
 	})
 	if err != nil {
+		// 完了に失敗した場合もAbortMultipartUploadを呼び出す
+		log.Printf("Failed to complete multipart upload: %v", err)
+		abortErr := abortMultipartUpload(stream.Context(), svc, bucket, key, uploadID)
+		if abortErr != nil {
+			log.Printf("Failed to abort multipart upload: %v", abortErr)
+		}
 		return errors.Wrap(err, "failed to complete multipart upload")
 	}
 
+	log.Println("Multipart upload completed successfully")
+
 	return nil
+}
+
+// マルチパートアップロードの中止
+func abortMultipartUpload(ctx context.Context, svc *s3.Client, bucket, key, uploadID string) error {
+	_, err := svc.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+		Bucket:   aws.String(bucket),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+	})
+	return err
 }
