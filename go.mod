@@ -1,4 +1,4 @@
-module github.com/norun9/s3cp
+module github.com/norun9/gopipe
 
 go 1.23.1
 

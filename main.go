@@ -1,6 +1,6 @@
 package main
 
-import "github.com/norun9/s3cp/cmd/client"
+import "github.com/norun9/gopipe/cmd/client"
 
 func main() {
 	client.Run()
