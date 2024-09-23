@@ -11,11 +11,21 @@ service FileUploadService {
   rpc MultipleUpload(stream MultipleUploadRequest) returns (stream MultipleUploadResponse);
 }
 
-message SingleUploadRequest {
+message AWSConfig {
+  string profile = 1;
+  string region = 2;
+}
+
+message S3Config {
   string bucket = 1;
   string key = 2;
+  string content_type = 3;
+}
+
+message SingleUploadRequest {
+  AWSConfig aws_config = 1;
+  S3Config s3_config = 2;
   bytes data = 3;         // File data, up to 5MB
-  AWSConfig aws_config = 4;
 }
 
 message SingleUploadResponse {
@@ -23,20 +33,14 @@ message SingleUploadResponse {
 }
 
 message MultipleUploadRequest {
-  string bucket = 1;
-  string key = 2;    // Filename being uploaded
+  AWSConfig aws_config = 1;
+  S3Config s3_config = 2;
   bytes chunk_data = 3; // Date of file chunk
   int32 chunk_number = 4; // Chunk number (indicate order)
-  AWSConfig aws_config = 5;
 }
 
 message MultipleUploadResponse {
   int32 chunk_number = 1;
   string message = 2;
   float progress = 3;
-}
-
-message AWSConfig {
-  string profile = 1;
-  string region = 2;
 }
