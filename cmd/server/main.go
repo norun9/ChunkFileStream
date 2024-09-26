@@ -21,14 +21,15 @@ import (
 
 func main() {
 	port := 80
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
 	if err != nil {
 		panic(err)
 	}
 
+	// TLS終端をIngressレベルで行うため、Kubernetesクラスタ内では通信を暗号化する必要はない
 	s := grpc.NewServer(
-		grpc.MaxRecvMsgSize(10*1024*1024),
-		grpc.MaxSendMsgSize(10*1024*1024),
+		grpc.MaxRecvMsgSize(6*1024*1024),
+		grpc.MaxSendMsgSize(6*1024*1024),
 	)
 
 	pb.RegisterFileUploadServiceServer(s, &server{})
@@ -131,7 +132,7 @@ func (*server) MultipleUpload(stream grpc.BidiStreamingServer[pb.MultipleUploadR
 		if err != nil {
 			abortErr := abortMultipartUpload(stream.Context(), svc, bucket, key, uploadID)
 			if abortErr != nil {
-				log.Printf("Failed to abort multipart upload: %v", abortErr)
+				log.Printf("failed to abort multipart upload: %v", abortErr)
 			}
 			return errors.Wrap(err, "failed to upload part")
 		}

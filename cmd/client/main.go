@@ -19,9 +19,9 @@ import (
 var (
 	profile       = flag.String("profile", "", "AWS profile")
 	region        = flag.String("region", "ap-northeast-1", "AWS region")
-	localFilePath = flag.String("file_path", "", "local file path to upload")
+	localFilePath = flag.String("file_path", "", "local file path for uploading to S3")
 	s3DestKey     = flag.String("dest_key", "", "S3 destination key to upload")
-	bucketName    = flag.String("bucket", "", "int flag")
+	bucketName    = flag.String("bucket", "", "S3 bucket name to upload")
 )
 
 func init() {
@@ -51,10 +51,11 @@ func Run() {
 	}
 	defer file.Close()
 
-	conn, err := grpc.NewClient("localhost:80",
+	conn, err := grpc.NewClient("localhost:62969",
 		grpc.WithInsecure(),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10*1024*1024)),
-		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(10*1024*1024)),
+		grpc.WithBlock(),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(6*1024*1024)),
+		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(6*1024*1024)),
 	)
 	if err != nil {
 		log.Fatalf("failed to grpc connect: %v", err)
@@ -70,15 +71,18 @@ func Run() {
 	}
 	fileSize := fileInfo.Size()
 
-	awsConfig := mys3.AWSConfig{Profile: *profile, Region: *region}
+	awsConfig := mys3.AWSConfig{
+		Profile: *profile,
+		Region:  *region,
+	}
 
 	if fileSize < chunkSize {
-		// If file size is smaller than chunkSize, use Unary RPC
+		// If file size is smaller than chunkSize, use "Unary RPC"
 		if err = singleUpload(client, file, awsConfig); err != nil {
 			log.Fatalf("failed to single upload file: %v", err)
 		}
 	} else {
-		// If file size is chunkSize or larger, use Bidirectional Streaming
+		// If file size is chunkSize or larger, use "Bidirectional Streaming RPC"
 		if err = multipleUpload(client, file, awsConfig); err != nil {
 			log.Fatalf("failed to multiple upload file: %v", err)
 		}
@@ -122,6 +126,7 @@ func singleUpload(client pb.FileUploadServiceClient, file *os.File, conf mys3.AW
 }
 
 // multipleUpload Bidirectional Streaming RPC Client
+// TODO: use Interceptor
 func multipleUpload(svc pb.FileUploadServiceClient, file *os.File, conf mys3.AWSConfig) (err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -133,6 +138,7 @@ func multipleUpload(svc pb.FileUploadServiceClient, file *os.File, conf mys3.AWS
 	buffer := make([]byte, chunkSize)
 	var chunkNumber int32 = 1
 	contentType := getContentType(file)
+	// TODO: use goroutine
 	for {
 		n, err := file.Read(buffer)
 		log.Printf("reads up to %d bytes", len(buffer))
@@ -144,7 +150,7 @@ func multipleUpload(svc pb.FileUploadServiceClient, file *os.File, conf mys3.AWS
 			return errors.Wrap(err, "failed to read file")
 		}
 
-		log.Printf("Sending chunk number %d with size %d bytes", chunkNumber, len(buffer[:n]))
+		log.Printf("[client] Sending chunk number %d with size %d bytes", chunkNumber, len(buffer[:n]))
 		// Process of sending
 		err = stream.Send(&pb.MultipleUploadRequest{
 			S3Config: &pb.S3Config{
@@ -160,8 +166,6 @@ func multipleUpload(svc pb.FileUploadServiceClient, file *os.File, conf mys3.AWS
 			return errors.Wrap(err, "failed to send chunk")
 		}
 
-		log.Println("received chunk from client")
-
 		// Process of receiving
 		resp, err := stream.Recv()
 		if err == io.EOF {
@@ -172,7 +176,7 @@ func multipleUpload(svc pb.FileUploadServiceClient, file *os.File, conf mys3.AWS
 		}
 
 		// Handle the server's response
-		fmt.Println("Received response:", resp.GetMessage())
+		log.Println("[client] Received response", resp.GetMessage())
 		chunkNumber++
 	}
 
