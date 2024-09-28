@@ -51,9 +51,14 @@ func Run() {
 	}
 	defer file.Close()
 
-	conn, err := grpc.NewClient("localhost:62969",
+	//creds, err := credentials.NewClientTLSFromFile("certs/grpc.crt", "")
+	//if err != nil {
+	//	log.Fatalf("could not load tls cert: %s", err)
+	//}
+
+	conn, err := grpc.NewClient("grpc-greeter.example.com:443",
+		//grpc.WithTransportCredentials(creds),
 		grpc.WithInsecure(),
-		grpc.WithBlock(),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(6*1024*1024)),
 		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(6*1024*1024)),
 	)

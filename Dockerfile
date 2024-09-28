@@ -17,7 +17,8 @@ RUN addgroup -S dockergroup && adduser -S docker -G dockergroup
 USER docker
 
 COPY --from=build ${ROOT}/server ${ROOT}
+COPY --from=build ${ROOT}/certs/grpc.crt ${ROOT}/certs/grpc.key ${ROOT}/certs/
 
-EXPOSE 80
+EXPOSE 50051
 
 CMD ["./server"]

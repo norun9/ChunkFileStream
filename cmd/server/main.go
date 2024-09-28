@@ -11,34 +11,47 @@ import (
 	mys3 "github.com/norun9/gopipe/pkg/s3"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/resolver"
 	"io"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"time"
 )
 
 func main() {
-	port := 80
-	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
+	certFile := "certs/grpc.crt"
+	keyFile := "certs/grpc.key"
+	creds, err := credentials.NewServerTLSFromFile(certFile, keyFile)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to load key pair: %v", err)
+	}
+
+	address := "0.0.0.0:50051"
+	lis, err := net.Listen("tcp", address)
+	if err != nil {
+		log.Fatalf("Failed to listen on port %v: %v", address, err)
 	}
 
 	// TLS終端をIngressレベルで行うため、Kubernetesクラスタ内では通信を暗号化する必要はない
 	s := grpc.NewServer(
+		grpc.Creds(creds),
 		grpc.MaxRecvMsgSize(6*1024*1024),
 		grpc.MaxSendMsgSize(6*1024*1024),
 	)
+
+	resolver.SetDefaultScheme("passthrough")
 
 	pb.RegisterFileUploadServiceServer(s, &server{})
 
 	reflection.Register(s)
 
 	go func() {
-		log.Printf("start gRPC server port: %v", port)
-		s.Serve(listener)
+		log.Printf("start gRPC server port: %v", address)
+		s.Serve(lis)
 	}()
 
 	quit := make(chan os.Signal, 1)
@@ -53,6 +66,7 @@ type server struct {
 }
 
 func (*server) SingleUpload(ctx context.Context, req *pb.SingleUploadRequest) (*pb.SingleUploadResponse, error) {
+	log.Printf("call SingleUploadRequest: Timestamp=%s", time.Now().Format(time.RFC3339))
 	awsConfigReq := req.GetAwsConfig()
 	s3ConfigReq := req.GetS3Config()
 	svc := mys3.NewClient(ctx, mys3.AWSConfig{Profile: awsConfigReq.GetProfile(), Region: awsConfigReq.GetRegion()})

@@ -1,71 +1,82 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: gopipe-server-dev
+  name: grpc
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  namespace: gopipe-server-dev
-  name: gopipe-server-deployment
+  namespace: grpc
+  name: dispatcher-server
   labels:
-    app: gopipe-server
+    app: dispatcher-server
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: gopipe-server
+      app: dispatcher-server
   template:
     metadata:
       labels:
-        app: gopipe-server
+        app: dispatcher-server
     spec:
       containers:
-        - name: gopipe-server
-          image: "gopipe-server-v2:latest"
+        - name: dispatcher-server
+          image: "gopipe-server:latest"
           imagePullPolicy: Never
           ports:
-            - containerPort: 80
+            - containerPort: 50051
+              name: grpc
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: gopipe-server-service
-  namespace: gopipe-server-dev
+  name: dispatcher-server
+  namespace:  grpc
+  labels:
+    app: dispatcher-server
 spec:
   selector:
-    app: gopipe-server
+    app: dispatcher-server
   ports:
-    - name: gopipe-server-service
+    - name: grpc
       protocol: TCP
-      port: 8080
-      targetPort: 80
-      nodePort: 30080
+      port: 50051 # ClusterIPで受けるポート番号
+      targetPort: 50051 # コンテナで受けるポート番号
+#      nodePort: 30080 # NodePortとして公開するポート
   # クラスター内のサービス同士が通信できるようにするための設定。外部からのアクセスはNodePortを使用せず、Ingressで処理する。
-  type: NodePort # TODO:NodePortにして `minikube service gopipe-server-service -n gopipe-server-dev` を確認する
-#---
-#apiVersion: networking.k8s.io/v1
-#kind: Ingress
-#metadata:
-#  name: gopipe-server-ingress
-#  namespace: gopipe-server-dev
-#  annotations:
-#    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-#    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
-#spec:
-#  ingressClassName: nginx
-#  tls:
-#    - hosts:
-#        - grpc.example.com
-#      secretName: grpc-secret
-#  rules:
-#    - host: grpc.example.com
-#      http:
-#        paths:
-#          - path: /
-#            pathType: Prefix
-#            backend:
-#              service:
-#                name: gopipe-server-service
-#                port:
-#                  number: 80
+#  type: NodePort # TODO:NodePortにして `minikube service gopipe-server-service -n gopipe-server-dev` を確認する
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    # pass ssl to app backend
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPCS"
+    nginx.ingress.kubernetes.io/grpc-backend: "true"
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+    nginx.ingress.kubernetes.io/service-upstream: "true"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600s"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600s"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600s"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+  name: greeter-ingress
+  namespace: grpc
+spec:
+  tls:
+    - hosts:
+        - grpc-greeter.example.com
+      secretName: grpc-tls-secret
+  ingressClassName: nginx
+  rules:
+    - host: grpc-greeter.example.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: dispatcher-server
+                port:
+                   number: 50051
+            pathType: Prefix
+            path: /
